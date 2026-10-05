@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <!-- スマホ向けビューポート設定（拡大防止・レスポンシブ） -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ドレミ判定（スマホ対応版）</title>
+  <script src="https://cdn.jsdelivr.net/npm/pitchy@4.1.0/dist/pitchy.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background-color: #f8f9fa;
+      color: #333;
+    }
+    h1 { font-size: 1.4rem; text-align: center; margin-bottom: 16px; }
+
+    /* タップしやすい大ボタン */
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 16px;
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #fff;
+      background-color: #007bff;
+      border: none;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      cursor: pointer;
+      margin-bottom: 16px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:active { background-color: #0056b3; transform: scale(0.98); }
+    .btn:disabled { background-color: #6c757d; opacity: 0.7; }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .target-card { border: 2px solid #007bff; background-color: #f0f7ff; }
+
+    .label { font-size: 0.85rem; color: #666; margin-bottom: 4px; }
+    .val { font-size: 1.3rem; font-weight: bold; color: #111; word-break: break-all; }
+
+    /* 判定結果 */
+    #judgeResult {
+      font-size: 1.3rem;
+      font-weight: bold;
+      padding: 16px;
+      border-radius: 12px;
+      text-align: center;
+      margin-bottom: 16px;
+      transition: all 0.2s ease;
+    }
+    .status-ok { background-color: #d4edda; color: #155724; border: 2px solid #c3e6cb; }
+    .status-ng { background-color: #f8d7da; color: #721c24; border: 2px solid #f5c6cb; }
+    .status-wait { background-color: #e2e3e5; color: #383d41; border: 2px solid #d6d8db; }
+
+    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .row:last-child { margin-bottom: 0; }
+  </style>
+</head>
+<body>
+
+  <h1>ドレミ＆ピッチ 判定デモ</h1>
+
+  <button id="startBtn" class="btn">🎤 マイクを開始する</button>
+
+  <div id="judgeResult" class="status-wait">「マイクを開始」を押してください</div>
+
+  <!-- 出題目標 -->
+  <div class="card target-card">
+    <div class="label">目標の音</div>
+    <div class="val">C4 (ド) / 261.6 Hz</div>
+  </div>
+
+  <!-- リアルタイムデータ -->
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="label">声（言葉）</div>
+        <div id="speechResult" class="val">-</div>
+      </div>
+      <div id="textCheck" class="val">-</div>
+    </div>
+    <hr style="border:0; border-top:1px solid #eee; margin:12px 0;">
+    <div class="row">
+      <div>
+        <div class="label">ピッチ（周波数）</div>
+        <div><span id="freqResult" class="val">-</span> <span style="font-size:0.9rem">Hz</span></div>
+      </div>
+      <div id="pitchCheck" class="val">-</div>
+    </div>
+  </div>
+
+<script>
+// 1. 判定設定
+const TARGET = {
+  freq: 261.63, // C4 (ド)
+  validKeywords: ["ド", "ど", "度", "戸", "土", "DO", "C"] // スマホの音声認識ブレ対策
+};
+
+let audioCtx = null;
+let analyser = null;
+let isAnalyzing = false;
+let currentSpeechText = "";
+let currentPitchFreq = 0;
+let recognition = null;
+
+// 2. 判定ロジック
+function checkSpeechText(text) {
+  if (!text) return false;
+  return TARGET.validKeywords.some(k => text.toUpperCase().includes(k.toUpperCase()));
+}
+
+function checkPitch(inputFreq, targetFreq, toleranceCents = 50) {
+  if (!inputFreq || inputFreq <= 0) return false;
+  const centDiff = Math.abs(1200 * Math.log2(inputFreq / targetFreq));
+  return centDiff <= toleranceCents;
+}
+
+function evaluateAnswer() {
+  const isTextOK = checkSpeechText(currentSpeechText);
+  const isPitchOK = checkPitch(currentPitchFreq, TARGET.freq);
+
+  const textCheckEl = document.getElementById('textCheck');
+  const pitchCheckEl = document.getElementById('pitchCheck');
+  const resultEl = document.getElementById('judgeResult');
+
+  textCheckEl.innerText = isTextOK ? "⭕" : "❌";
+  textCheckEl.style.color = isTextOK ? "#28a745" : "#dc3545";
+
+  pitchCheckEl.innerText = isPitchOK ? "⭕" : "❌";
+  pitchCheckEl.style.color = isPitchOK ? "#28a745" : "#dc3545";
+
+  if (isTextOK && isPitchOK) {
+    resultEl.innerText = "🎉 正解！（声＋ピッチ合格）";
+    resultEl.className = "status-ok";
+  } else if (isTextOK && !isPitchOK) {
+    resultEl.innerText = "⚠️ 声はOK！ピッチを合わせよう";
+    resultEl.className = "status-ng";
+  } else if (!isTextOK && isPitchOK) {
+    resultEl.innerText = "⚠️ ピッチはOK！「ド」と発声してね";
+    resultEl.className = "status-ng";
+  } else {
+    resultEl.innerText = "🎧 声を出してみてください";
+    resultEl.className = "status-wait";
+  }
+}
+
+// 3. ピッチ検出（AudioContext）
+async function startPitchDetection() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const source = audioCtx.createMediaStreamSource(stream);
+
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  source.connect(analyser);
+
+  const detector = Pitchy.PitchDetector.forFloat32Array(analyser.fftSize);
+  const inputBuffer = new Float32Array(analyser.fftSize);
+
+  function updatePitch() {
+    if (!isAnalyzing) return;
+    analyser.getFloatTimeDomainData(inputBuffer);
+    const [pitch, clarity] = detector.findPitch(inputBuffer, audioCtx.sampleRate);
+
+    // スマホマイク用にclarity閾値を0.55に緩和
+    if (clarity > 0.55 && pitch > 60 && pitch < 1000) {
+      currentPitchFreq = pitch;
+      document.getElementById('freqResult').innerText = pitch.toFixed(1);
+    } else {
+      currentPitchFreq = 0;
+      document.getElementById('freqResult').innerText = "-";
+    }
+
+    evaluateAnswer();
+    requestAnimationFrame(updatePitch);
+  }
+
+  isAnalyzing = true;
+  updatePitch();
+}
+
+// 4. 音声認識（Web Speech API）
+function startSpeechRecognition() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    document.getElementById('speechResult').innerText = "非対応ブラウザです";
+    return;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.lang = 'ja-JP';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onresult = (event) => {
+    let text = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      text += event.results[i][0].transcript;
+    }
+    currentSpeechText = text;
+    document.getElementById('speechResult').innerText = text || "-";
+    evaluateAnswer();
+  };
+
+  // スマホのタイムアウト切断対策（切れたら自動再開）
+  recognition.onend = () => {
+    if (isAnalyzing) {
+      try { recognition.start(); } catch(e) {}
+    }
+  };
+
+  try { recognition.start(); } catch(e) {}
+}
+
+// 5. スマホユーザーイベント（タップ時にAudioContextを初期化）
+document.getElementById('startBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('startBtn');
+  btn.disabled = true;
+  btn.innerText = "マイク起動中...";
+
+  try {
+    // 【最重要】iOS/Android対策: タップイベントのコンテキストで直接AudioContextを作成・再開
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new AudioContextClass();
+    
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume();
+    }
+
+    await startPitchDetection();
+    startSpeechRecognition();
+
+    btn.innerText = "🎤 解析中（マイクON）";
+  } catch (err) {
+    alert("マイクの起動に失敗しました。ブラウザのマイク許可を確認してください。\n" + err);
+    btn.disabled = false;
+    btn.innerText = "🎤 マイクを開始する";
+  }
+});
+</script>
+</body>
+</html>
